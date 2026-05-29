@@ -187,10 +187,12 @@ async def chat_stream(request: SimpleChatRequest):
                  yield json.dumps({"type": "progress", "text": "⚖️ Judge is evaluating findings..."}) + "\n"
             elif event["author"] == "content_builder":
                  yield json.dumps({"type": "progress", "text": "✍️ Content Builder is writing the course..."}) + "\n"
-            # Accumulate final text
-            if "content" in event and event["content"]:
+            # Accumulate final text only from the Content Builder, which produces
+            # the course. Researcher findings and Judge feedback also stream
+            # through here and must not be included in the final result.
+            if event.get("author") == "content_builder" and event.get("content"):
                 content = genai_types.Content.model_validate(event["content"])
-                for part in content.parts: # type: ignore
+                for part in (content.parts or []):
                     if part.text:
                         final_text += part.text
         # Send final result
