@@ -11,6 +11,7 @@ This project uses a distributed microservices architecture where each agent runs
 *   **Judge Service (`judge`):** A standalone agent that evaluates research quality.
 *   **Content Builder Service (`content_builder`):** A standalone agent that compiles the final course.
 *   **Agent App (`app`):** A web application that queries the Orchestrator agent, displays progress and results.
+*   **Redis:** A shared cache used by the Orchestrator to serve repeated topics without re-running the pipeline (see [Caching](#caching)).
 
 ## Project Structure
 
@@ -36,10 +37,38 @@ To avoid duplication, these files are linked into respective subdirectories as [
 * `adk_app.py` - ADK API Service implementation with additional A2A functionality.
 * `authenticated_httpx.py` - [httpx](https://www.python-httpx.org/) client extension for [service-to-service requests](https://docs.cloud.google.com/run/docs/authenticating/service-to-service).
 
+## Caching
+
+The Orchestrator caches the **finished course** in [Redis](https://redis.io/), keyed by a
+normalized hash of the topic. This avoids re-running the expensive
+`Researcher → Judge → Content Builder` pipeline (multiple LLM calls plus Google
+Search) when the same topic is requested again.
+
+* **On a cache hit**, the root pipeline's `before_agent_callback`
+  (`check_course_cache` in [`agents/orchestrator/agent.py`](agents/orchestrator/agent.py))
+  returns the cached course directly. ADK then skips the entire pipeline and
+  ends the invocation, so the response is served in milliseconds.
+* **On a cache miss**, the pipeline runs normally and the Content Builder's
+  `after_agent_callback` (`save_course_to_cache`) writes the finished course to
+  Redis with a 24-hour TTL.
+* **Why Redis (not an in-process dict):** on Cloud Run the Orchestrator runs as
+  multiple stateless instances. An external shared cache lets an entry written
+  by one instance be reused by all of them — that's what makes it a
+  *distributed* cache.
+* **Graceful degradation:** all cache operations are wrapped so that an
+  unreachable Redis silently falls back to a cache miss. Caching is a pure
+  optimization and is never a hard dependency of the pipeline.
+
+The cache is configured via the `REDIS_URL` environment variable (defaults to
+`redis://localhost:6379`).
+
 ## Requirements
 
 *   **uv**: Python package manager (required for local development).
 *   **Google Cloud SDK**: For GCP services and authentication.
+*   **Redis**: Distributed cache for the Orchestrator. Run one locally with
+    `docker run -d --name redis -p 6379:6379 redis:7`. Optional — the pipeline
+    still works without it, just without cache hits.
 
 ## Quick Start
 
@@ -55,13 +84,19 @@ To avoid duplication, these files are linked into respective subdirectories as [
     ```
     And ensure your `GOOGLE_CLOUD_PROJECT` environment variable is set.
 
-3.  **Run Locally:**
+3.  **Start Redis (optional, enables caching):**
+    ```bash
+    docker run -d --name redis -p 6379:6379 redis:7
+    ```
+
+4.  **Run Locally:**
     ```bash
     ./run_local.sh
     ```
-    This will start all 4 agents and the web app in background processes
+    This will start all 4 agents and the web app in background processes.
+    The script checks whether Redis is reachable and prints a warning if not.
 
-4.  **Access the App:**
+5.  **Access the App:**
     Open **http://localhost:8000** in your browser.
 
 ## Deployment
@@ -70,6 +105,11 @@ To deploy to Google Cloud Run, you need to deploy each service individually and 
 
 1.  **Deploy Researcher, Judge, Content Builder, and Orchestrator:**
     Deploy each of these folders as a separate Cloud Run service. Note down their URLs (e.g., `https://researcher-xyz.a.run.app`).
+
+    For caching in production, provision a managed Redis (e.g.
+    [Memorystore for Redis](https://cloud.google.com/memorystore)) and set
+    `REDIS_URL` on the **Orchestrator** service to its connection string. If
+    `REDIS_URL` is omitted, the Orchestrator runs fine but without cache hits.
 
 2.  **Deploy Agent App:**
     Deploy the `app/` folder to Cloud Run.

@@ -6,8 +6,10 @@ from google.adk.agents.remote_a2a_agent import RemoteA2aAgent
 from google.adk.events import Event, EventActions
 from google.adk.agents.invocation_context import InvocationContext
 from google.adk.agents.callback_context import CallbackContext
+from google.genai import types
 
 from authenticated_httpx import create_authenticated_client
+import cache
 
 # --- Callbacks ---
 def create_save_output_callback(key: str):
@@ -30,6 +32,59 @@ def create_save_output_callback(key: str):
                     print(f"[{ctx.agent_name}] Saved output to state['{key}']")
                     return
     return callback
+
+# --- Redis Course Cache ---
+# A repeated request for the same topic is served from Redis, skipping the
+# whole Researcher -> Judge -> ContentBuilder pipeline. On a cache hit the
+# root before-callback returns Content; ADK then sets end_invocation=True and
+# skips the pipeline entirely. On a miss the pipeline runs normally and
+# ContentBuilder's after-callback stores the finished course.
+
+def _extract_topic(ctx: CallbackContext) -> str:
+    """Best-effort extraction of the user's topic for this invocation."""
+    user_content = getattr(ctx, "user_content", None)
+    if user_content and getattr(user_content, "parts", None):
+        for part in user_content.parts:
+            if getattr(part, "text", None):
+                return part.text
+    # Fall back to the latest user-authored message in the session.
+    for event in reversed(ctx.session.events):
+        if event.author == "user" and event.content and event.content.parts:
+            text = event.content.parts[0].text
+            if text:
+                return text
+    return ""
+
+
+def check_course_cache(callback_context: CallbackContext, **kwargs):
+    """Root before-callback: serve a cached course if one exists for the topic."""
+    ctx = callback_context
+    topic = _extract_topic(ctx)
+    # Remember the topic so the after-callback can key the cache write.
+    ctx.state["topic"] = topic
+    if not topic:
+        return None
+    cached = cache.get_cached(cache.make_course_key(topic))
+    if cached:
+        print(f"[course_creation_pipeline] ⚡ Cache HIT for topic={topic!r}; skipping pipeline")
+        # Returning Content makes ADK skip the pipeline and end the invocation.
+        return types.Content(role="model", parts=[types.Part(text=cached)])
+    print(f"[course_creation_pipeline] Cache MISS for topic={topic!r}; running pipeline")
+    return None
+
+
+def save_course_to_cache(callback_context: CallbackContext, **kwargs) -> None:
+    """ContentBuilder after-callback: persist the finished course to Redis."""
+    ctx = callback_context
+    topic = ctx.state.get("topic", "")
+    if not topic:
+        return
+    for event in reversed(ctx.session.events):
+        if event.author == ctx.agent_name and event.content and event.content.parts:
+            text = event.content.parts[0].text
+            if text:
+                cache.set_cached(cache.make_course_key(topic), text)
+                return
 
 # --- Remote Agents ---
 
@@ -67,6 +122,8 @@ content_builder = RemoteA2aAgent(
     name="content_builder",
     agent_card=content_builder_url,
     description="Builds the course.",
+    # Persist the finished course to Redis, keyed by the topic saved in state.
+    after_agent_callback=save_course_to_cache,
     httpx_client=create_authenticated_client(content_builder_url)
 )
 
@@ -122,5 +179,7 @@ root_agent = SequentialAgent(
     name="course_creation_pipeline",
     description="A pipeline that researches a topic and then builds a course from it.",
     sub_agents=[research_loop, content_builder],
+    # Serve repeat topics straight from Redis, skipping the whole pipeline.
+    before_agent_callback=check_course_cache,
 )
 

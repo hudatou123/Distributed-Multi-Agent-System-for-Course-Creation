@@ -9,6 +9,17 @@ export GOOGLE_CLOUD_PROJECT=$(gcloud config get-value project)
 export GOOGLE_CLOUD_LOCATION="global"
 export GOOGLE_GENAI_USE_VERTEXAI="True" # Use Gemini API locally
 export GOOGLE_API_KEY="<your-key-here>" # Use if not using Vertex AI
+export REDIS_URL="redis://localhost:6379" # Distributed course cache (orchestrator)
+
+# Make sure Redis is running. The cache degrades gracefully if it isn't, but
+# you won't get any cache hits. Start one quickly with:
+#   docker run -d --name redis -p 6379:6379 redis:7
+if ! (exec 3<>/dev/tcp/127.0.0.1/6379) 2>/dev/null; then
+  echo "⚠️  Redis not reachable on localhost:6379 — caching disabled (pipeline still works)."
+  echo "    Start it with: docker run -d --name redis -p 6379:6379 redis:7"
+else
+  echo "✅ Redis is up on localhost:6379"
+fi
 
 echo "Starting Researcher Agent on port 8001..."
 pushd agents/researcher
