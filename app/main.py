@@ -27,12 +27,17 @@ class Feedback(BaseModel):
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-provider = TracerProvider()
-processor = export.BatchSpanProcessor(
-    CloudTraceSpanExporter(),
-)
-provider.add_span_processor(processor)
-trace.set_tracer_provider(provider)
+# Cloud Trace export requires Google credentials. Make it optional so the app
+# still runs locally (e.g. on the AI Studio API-key path) without ADC.
+try:
+    provider = TracerProvider()
+    processor = export.BatchSpanProcessor(
+        CloudTraceSpanExporter(),
+    )
+    provider.add_span_processor(processor)
+    trace.set_tracer_provider(provider)
+except Exception as e:
+    logger.warning(f"Cloud Trace disabled (no Google credentials?): {e}")
 
 app = FastAPI()
 
@@ -181,7 +186,9 @@ async def chat_stream(request: SimpleChatRequest):
         final_text = ""
         async for event in events:
             # Send progress updates based on which agent is active
-            if event["author"] == "researcher":
+            if event["author"] == "knowledge_base":
+                 yield json.dumps({"type": "progress", "text": "📚 Checking the local knowledge base..."}) + "\n"
+            elif event["author"] == "researcher":
                  yield json.dumps({"type": "progress", "text": "🔍 Researcher is gathering information..."}) + "\n"
             elif event["author"] == "judge":
                  yield json.dumps({"type": "progress", "text": "⚖️ Judge is evaluating findings..."}) + "\n"

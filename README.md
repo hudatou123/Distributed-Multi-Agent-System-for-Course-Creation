@@ -7,7 +7,7 @@ A multi-agent system built with Google's Agent Development Kit (ADK) and Agent-t
 This project uses a distributed microservices architecture where each agent runs in its own container and communicates via A2A:
 
 *   **Orchestrator Service (`orchestrator`):** The main entry point. It manages the workflow using `LoopAgent` and `SequentialAgent`, and connects to other agents using `RemoteA2aAgent`.
-*   **Researcher Service (`researcher`):** A standalone agent that gathers information using Google Search.
+*   **Researcher Service (`researcher`):** A standalone agent that gathers information using Google Search and a curated local knowledge base exposed over MCP (see [Knowledge Base via MCP](#knowledge-base-via-mcp)).
 *   **Judge Service (`judge`):** A standalone agent that evaluates research quality.
 *   **Content Builder Service (`content_builder`):** A standalone agent that compiles the final course.
 *   **Agent App (`app`):** A web application that queries the Orchestrator agent, displays progress and results.
@@ -24,6 +24,7 @@ course-creation-agent/
     └── content_builder/     # Content Builder agent, A2A microservice
 ├── app/                     # Web App service application
     └── frontend/            # Frontend application
+├── knowledge_base/          # Curated docs the Researcher reads over MCP
 ├── shared/                  # Files used by all agents
 └── ...
 ```
@@ -62,10 +63,41 @@ Search) when the same topic is requested again.
 The cache is configured via the `REDIS_URL` environment variable (defaults to
 `redis://localhost:6379`).
 
+## Knowledge Base via MCP
+
+The Researcher reads a curated local knowledge base over the
+[Model Context Protocol (MCP)](https://modelcontextprotocol.io/). This lets you
+drop trusted reference material — e.g. detailed course syllabi and internal
+standards — into the [`knowledge_base/`](knowledge_base/) folder and have the
+agent ground its research in it before falling back to the public web.
+
+* **How it connects:** the Researcher
+  ([`agents/researcher/agent.py`](agents/researcher/agent.py)) mounts the
+  official `@modelcontextprotocol/server-filesystem` MCP server via ADK's
+  `McpToolset`. The server is launched on demand with `npx`, so **Node.js is
+  required** for this feature.
+* **Read-only by design:** only read-oriented tools (`read_file`,
+  `list_directory`, `search_files`, …) are exposed via `tool_filter`, so the
+  agent can read curated material but never modify it.
+* **Tool priority:** the Researcher consults the knowledge base *first* and uses
+  Google Search only to fill gaps.
+* **Configuration:** the folder defaults to `knowledge_base/` at the repo root
+  and can be overridden with the `KNOWLEDGE_BASE_DIR` environment variable.
+* **Graceful degradation:** if Node/`npx` is unavailable the rest of the
+  pipeline still runs; the Researcher just loses its local-knowledge tools.
+
+> **MCP vs A2A:** these are two different protocols used here. **A2A** connects
+> agents *to each other*; **MCP** connects an agent *to external tools/data
+> sources*. The Researcher uses MCP for the knowledge base; the Orchestrator
+> uses A2A to reach the Researcher/Judge/Content Builder.
+
 ## Requirements
 
 *   **uv**: Python package manager (required for local development).
 *   **Google Cloud SDK**: For GCP services and authentication.
+*   **Node.js**: Provides `npx`, used to launch the filesystem MCP server for
+    the Researcher's knowledge base. Optional — the pipeline still works
+    without it, just without the local knowledge base.
 *   **Redis**: Distributed cache for the Orchestrator. Run one locally with
     `docker run -d --name redis -p 6379:6379 redis:7`. Optional — the pipeline
     still works without it, just without cache hits.

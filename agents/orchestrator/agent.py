@@ -94,6 +94,17 @@ def save_course_to_cache(callback_context: CallbackContext, **kwargs) -> None:
 
 # ... existing code ...
 
+# Connect to the Knowledge Base agent (Localhost port 8005). It runs first and
+# reports any relevant curated local material (syllabi, standards) via MCP.
+knowledge_base_url = os.environ.get("KNOWLEDGE_BASE_AGENT_CARD_URL", "http://localhost:8005/a2a/agent/.well-known/agent-card.json")
+knowledge_base = RemoteA2aAgent(
+    name="knowledge_base",
+    agent_card=knowledge_base_url,
+    description="Looks up curated local reference material via MCP.",
+    after_agent_callback=create_save_output_callback("kb_findings"),
+    httpx_client=create_authenticated_client(knowledge_base_url)
+)
+
 # Connect to the Researcher (Localhost port 8001)
 researcher_url = os.environ.get("RESEARCHER_AGENT_CARD_URL", "http://localhost:8001/a2a/agent/.well-known/agent-card.json")
 researcher = RemoteA2aAgent(
@@ -169,7 +180,9 @@ research_loop = LoopAgent(
     name="research_loop",
     description="Iteratively researches and judges until quality standards are met.",
     sub_agents=[researcher, judge, escalation_checker],
-    max_iterations=3,
+    # Lowered from 3 to 1 to stay under the Gemini free-tier rate limit
+    # (5 requests/minute). Raise it again on a paid tier for better quality.
+    max_iterations=1,
 )
 
 # TODO: Define the Root Agent (Pipeline)
@@ -177,8 +190,10 @@ research_loop = LoopAgent(
 
 root_agent = SequentialAgent(
     name="course_creation_pipeline",
-    description="A pipeline that researches a topic and then builds a course from it.",
-    sub_agents=[research_loop, content_builder],
+    description="A pipeline that checks the local knowledge base, researches a topic, then builds a course from it.",
+    # Knowledge base first (local material), then the research loop (web search
+    # fills gaps), then the course builder.
+    sub_agents=[knowledge_base, research_loop, content_builder],
     # Serve repeat topics straight from Redis, skipping the whole pipeline.
     before_agent_callback=check_course_cache,
 )
