@@ -180,9 +180,11 @@ research_loop = LoopAgent(
     name="research_loop",
     description="Iteratively researches and judges until quality standards are met.",
     sub_agents=[researcher, judge, escalation_checker],
-    # Lowered from 3 to 1 to stay under the Gemini free-tier rate limit
-    # (5 requests/minute). Raise it again on a paid tier for better quality.
-    max_iterations=1,
+    # Allows one refinement pass (Researcher -> Judge -> Researcher), which
+    # captures most of the reflection benefit at modest cost. Lowered from the
+    # original 3 to ease Gemini free-tier rate limits (5 requests/minute); 3
+    # rarely adds value. Set to 1 to disable reflection entirely.
+    max_iterations=2,
 )
 
 # TODO: Define the Root Agent (Pipeline)
