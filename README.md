@@ -1,6 +1,6 @@
 # course-creation-agent (Distributed)
 
-A multi-agent system built with Google's Agent Development Kit (ADK) and Agent-to-Agent (A2A) protocol. It features a team of microservice agents that research, judge, and build content, orchestrated to deliver high-quality results.
+A multi-agent system built with Google's Agent Development Kit (ADK) and Agent-to-Agent (A2A) protocol. It features a team of microservice agents that consult a curated local knowledge base (via MCP), research, judge, and build content, orchestrated to deliver high-quality results.
 
 ## Architecture
 
@@ -28,6 +28,15 @@ Knowledge Base  →  Research Loop (Researcher ↔ Judge)  →  Content Builder
 
 > The Knowledge Base and Researcher are deliberately **separate agents**: ADK disables automatic function calling when a built-in tool (`google_search`) is mixed with MCP tools on the *same* agent, so each agent holds only one kind of tool. See [Knowledge Base via MCP](#knowledge-base-via-mcp).
 
+### Models
+
+Every agent uses **`gemini-3.5-flash-lite`** by default, set via the `MODEL`
+constant near the top of each agent's `agent.py` — change it there (per agent)
+to use a different Gemini model, e.g. a stronger one for the Content Builder.
+Note: only Gemini models support the Researcher's built-in `google_search`
+tool. Other providers (e.g. Anthropic Claude) can be wired in via ADK's LiteLLM
+integration, but not together with `google_search`.
+
 ## Project Structure
 
 ```
@@ -53,7 +62,7 @@ To avoid duplication, these files are linked into respective subdirectories as [
 
 * `a2a_utils.py` - contains code for rewriting agent URLs in A2A AgentCard when deployed in Cloud Run.
 * `adk_app.py` - ADK API Service implementation with additional A2A functionality.
-* `authenticated_httpx.py` - [httpx](https://www.python-httpx.org/) client extension for [service-to-service requests](https://docs.cloud.google.com/run/docs/authenticating/service-to-service).
+* `authenticated_httpx.py` - [httpx](https://www.python-httpx.org/) client extension for [service-to-service requests](https://docs.cloud.google.com/run/docs/authenticating/service-to-service). It attaches a GCP identity token when calling Cloud Run services, and **skips auth for `localhost` targets** so the pipeline runs locally without `gcloud`.
 
 ## Caching
 
@@ -166,13 +175,14 @@ in it before falling back to the public web.
 5.  **Access the App:**
     Open **http://localhost:8000** in your browser.
 
-> **Free-tier rate limits:** Gemini's free tier caps requests per minute
-> (e.g. 5/min for some models), and this multi-agent pipeline makes several LLM
-> calls per course. You may hit `429 RESOURCE_EXHAUSTED`. Mitigations: wait ~60s
-> between generations, keep the research loop's `max_iterations` low (it is set
-> to `2` in [`agents/orchestrator/agent.py`](agents/orchestrator/agent.py) — one
-> refinement pass; set `1` to disable reflection, `3` rarely adds value), or
-> enable billing for higher limits.
+> **Rate limits & cost:** this multi-agent pipeline makes several Gemini calls
+> per course, and the research loop's `max_iterations` (in
+> [`agents/orchestrator/agent.py`](agents/orchestrator/agent.py), currently `3`)
+> multiplies the Researcher/Judge calls. On Gemini's **free tier** (e.g. 5
+> requests/min for some models) you may hit `429 RESOURCE_EXHAUSTED` — mitigate
+> by lowering `max_iterations` (`1` disables reflection, `2` keeps one refinement
+> pass) or waiting ~60s between generations. On a **paid tier** the limits are
+> high enough to run the full pipeline normally.
 
 ## Deployment
 

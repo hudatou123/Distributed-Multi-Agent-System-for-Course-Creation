@@ -2,7 +2,7 @@ from google.adk.agents import Agent
 from google.adk.tools.google_search_tool import google_search
 
 
-MODEL = "gemini-3-flash-preview"
+MODEL = "gemini-3.5-flash-lite"
 
 # Define the Researcher Agent
 #

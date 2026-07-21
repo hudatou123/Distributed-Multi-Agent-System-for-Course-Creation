@@ -5,7 +5,7 @@ from google.adk.tools.mcp_tool import McpToolset, StdioConnectionParams
 from mcp import StdioServerParameters
 
 
-MODEL = "gemini-3-flash-preview"
+MODEL = "gemini-3.5-flash-lite"
 
 # --- Local Knowledge Base over MCP ---
 # This agent's ONLY tools are the read-only filesystem MCP tools. Keeping the

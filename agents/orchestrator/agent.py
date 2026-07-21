@@ -180,11 +180,12 @@ research_loop = LoopAgent(
     name="research_loop",
     description="Iteratively researches and judges until quality standards are met.",
     sub_agents=[researcher, judge, escalation_checker],
-    # Allows one refinement pass (Researcher -> Judge -> Researcher), which
-    # captures most of the reflection benefit at modest cost. Lowered from the
-    # original 3 to ease Gemini free-tier rate limits (5 requests/minute); 3
-    # rarely adds value. Set to 1 to disable reflection entirely.
-    max_iterations=2,
+    # Up to 3 refinement passes (Researcher -> Judge -> Researcher); the
+    # EscalationChecker exits early once the Judge passes. More passes = more
+    # chances to meet the quality bar at the cost of more LLM calls per course.
+    # Most of the benefit comes from the first pass — lower to 1-2 to cut
+    # cost/latency (e.g. under a tight free-tier rate limit).
+    max_iterations=3,
 )
 
 # TODO: Define the Root Agent (Pipeline)
