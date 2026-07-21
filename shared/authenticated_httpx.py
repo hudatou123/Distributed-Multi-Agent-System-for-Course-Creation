@@ -27,6 +27,13 @@ def create_authenticated_client(
         httpx.AsyncClient: httpx Client with Google identity token authentication.
     """
 
+    # Local development: localhost services are not behind Cloud Run IAM, so
+    # skip identity-token auth (which would otherwise require gcloud / ADC and
+    # crash when neither is available).
+    hostname = urlparse(remote_service_url).hostname or ""
+    if hostname in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
+        return httpx.AsyncClient(follow_redirects=True, timeout=timeout)
+
     class _IdentityTokenAuth(httpx.Auth):
         def __init__(self, remote_service_url: str):
             parsed_url = urlparse(remote_service_url)
@@ -78,7 +85,7 @@ def create_authenticated_client(
                             self.session = AuthorizedSession(
                                 credentials
                             )
-                    except subprocess.SubprocessError:
+                    except (subprocess.SubprocessError, FileNotFoundError):
                         print("ERROR: Unable to fetch identity token.")
             if id_token:
                 request.headers["Authorization"] = f"Bearer {id_token}"

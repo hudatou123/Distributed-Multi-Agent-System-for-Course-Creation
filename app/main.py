@@ -27,12 +27,17 @@ class Feedback(BaseModel):
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-provider = TracerProvider()
-processor = export.BatchSpanProcessor(
-    CloudTraceSpanExporter(),
-)
-provider.add_span_processor(processor)
-trace.set_tracer_provider(provider)
+# Cloud Trace export requires Google credentials. Make it optional so the app
+# still runs locally (e.g. on the AI Studio API-key path) without ADC.
+try:
+    provider = TracerProvider()
+    processor = export.BatchSpanProcessor(
+        CloudTraceSpanExporter(),
+    )
+    provider.add_span_processor(processor)
+    trace.set_tracer_provider(provider)
+except Exception as e:
+    logger.warning(f"Cloud Trace disabled (no Google credentials?): {e}")
 
 app = FastAPI()
 
@@ -181,16 +186,22 @@ async def chat_stream(request: SimpleChatRequest):
         final_text = ""
         async for event in events:
             # Send progress updates based on which agent is active
-            if event["author"] == "researcher":
+            if event["author"] == "knowledge_base":
+                 yield json.dumps({"type": "progress", "text": "📚 Checking the local knowledge base..."}) + "\n"
+            elif event["author"] == "researcher":
                  yield json.dumps({"type": "progress", "text": "🔍 Researcher is gathering information..."}) + "\n"
             elif event["author"] == "judge":
                  yield json.dumps({"type": "progress", "text": "⚖️ Judge is evaluating findings..."}) + "\n"
             elif event["author"] == "content_builder":
                  yield json.dumps({"type": "progress", "text": "✍️ Content Builder is writing the course..."}) + "\n"
-            # Accumulate final text only from the Content Builder, which produces
-            # the course. Researcher findings and Judge feedback also stream
-            # through here and must not be included in the final result.
-            if event.get("author") == "content_builder" and event.get("content"):
+            elif event["author"] == "course_creation_pipeline" and event.get("content"):
+                 yield json.dumps({"type": "progress", "text": "⚡ Found a cached course, returning instantly..."}) + "\n"
+            # Accumulate final text from the Content Builder, which produces the
+            # course. A cache hit short-circuits the pipeline and emits the
+            # course as a "course_creation_pipeline" event instead, so accept
+            # that author too. Researcher findings and Judge feedback also
+            # stream through here and must not be included in the final result.
+            if event.get("author") in ("content_builder", "course_creation_pipeline") and event.get("content"):
                 content = genai_types.Content.model_validate(event["content"])
                 for part in (content.parts or []):
                     if part.text:

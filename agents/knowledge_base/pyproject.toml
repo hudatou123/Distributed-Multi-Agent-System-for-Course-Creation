@@ -1,7 +1,7 @@
 [project]
-name = "orchestrator-builder-agent"
+name = "knowledge-base-agent"
 version = "0.1.0"
-description = "Orchestrator microservice agent"
+description = "Knowledge Base microservice agent (reads curated local docs via MCP)"
 requires-python = ">=3.10,<3.14"
 dependencies = [
     "google-adk>=1.27.4,<2.0.0",
@@ -10,7 +10,7 @@ dependencies = [
     "uvicorn==0.40.0",
     "google-cloud-logging==3.13.0",
     "opentelemetry-exporter-gcp-trace==1.11.0",
-    "redis>=5.0,<6.0",
+    "mcp>=1.25.0",
 ]
 
 [[tool.uv.index]]
